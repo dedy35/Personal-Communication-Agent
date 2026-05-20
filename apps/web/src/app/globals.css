@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --bg-a: #f8fafc;
+  --bg-b: #e2e8f0;
+  --ink: #0f172a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  font-family: "Trebuchet MS", "Noto Sans JP", "Segoe UI Variable Text", sans-serif;
+  background-image:
+    radial-gradient(circle at 10% 10%, #dbeafe 0%, transparent 30%),
+    radial-gradient(circle at 85% 20%, #dcfce7 0%, transparent 30%),
+    linear-gradient(150deg, var(--bg-a), var(--bg-b));
+}
