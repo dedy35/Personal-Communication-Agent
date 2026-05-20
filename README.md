@@ -25,6 +25,31 @@ Production-first local personal communication agent monorepo.
    - `npm install`
    - `npm run dev`
 
+## Windows Dev Scripts
+- Start database + backend + frontend:
+  - `powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1`
+- Start without reinstalling dependencies:
+  - `powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 -SkipInstall`
+- Backup PostgreSQL:
+  - `powershell -ExecutionPolicy Bypass -File .\scripts\backup-db.ps1`
+- Backup PostgreSQL to a custom folder:
+  - `powershell -ExecutionPolicy Bypass -File .\scripts\backup-db.ps1 -OutputDir D:\pca-backups`
+
+## Access From Phone/Tablet via Tailscale (Private Only)
+- Keep this setup private in your Tailnet. Do not publish it publicly.
+- Do not use Tailscale Funnel for this dashboard.
+- On your Windows laptop, run:
+  - `powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1`
+- Ensure your web dev server listens on all interfaces:
+  - The script starts Next.js with `--hostname 0.0.0.0`.
+- Ensure API base URL points to laptop Tailnet IP in `.env`:
+  - `NEXT_PUBLIC_API_BASE_URL=http://<YOUR_LAPTOP_TAILSCALE_IP>:8000`
+- Find your laptop Tailnet IPv4:
+  - `tailscale ip -4`
+- Open dashboard from phone/tablet browser:
+  - `http://<YOUR_LAPTOP_TAILSCALE_IP>:3000`
+- Make sure both devices are logged into the same Tailnet and laptop firewall allows private-network access to ports `3000` and `8000`.
+
 ## Local AI Provider (Ollama, Optional but Integrated)
 - The backend uses a local `AIProvider` abstraction with `OllamaProvider`.
 - Default Ollama URL is `http://localhost:11434`.
