@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
+from app.routes.agent_chat import router as agent_chat_router
+from app.routes.dashboard_data import router as dashboard_router
 from app.routes.health import router as health_router
 
 
@@ -30,6 +32,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.include_router(health_router)
+    app.include_router(dashboard_router)
+    app.include_router(agent_chat_router)
 
     logger = logging.getLogger(__name__)
     logger.info(

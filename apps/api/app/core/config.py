@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    database_url: str = "postgresql+psycopg://pca_user:pca_password@localhost:5432/pca"
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 

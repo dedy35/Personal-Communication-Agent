@@ -18,6 +18,7 @@ Production-first local personal communication agent monorepo.
    - `cd apps/api`
    - `python -m venv .venv && source .venv/bin/activate`
    - `pip install -r requirements.txt`
+   - `alembic upgrade head`
    - `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
 4. Start Web:
    - `cd apps/web`
@@ -27,3 +28,4 @@ Production-first local personal communication agent monorepo.
 ## Current Scope
 - Includes minimal API health endpoint and placeholder dashboard page.
 - Slack, WhatsApp, and LINE integrations are intentionally not implemented yet.
+- PostgreSQL schema and sample seed data are managed by Alembic migrations.
