@@ -28,6 +28,11 @@ class Settings(BaseSettings):
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
+    ollama_enabled: bool = True
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3.1:8b"
+    ollama_timeout_seconds: float = 1.5
+
     cors_allowed_origins: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:3000",

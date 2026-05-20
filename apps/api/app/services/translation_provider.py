@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Protocol
 
 from app.schemas.translation import TranslationContext
+from app.services.ai_provider import AIProvider
 
 
 class TranslationProvider(Protocol):
@@ -189,3 +191,145 @@ class RuleBasedTranslationProvider:
     @staticmethod
     def _contains_japanese_chars(text: str) -> bool:
         return re.search(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]", text) is not None
+
+
+class AIEnhancedTranslationProvider:
+    """Uses AI when available, with deterministic rule-based fallback."""
+
+    def __init__(self, ai_provider: AIProvider, fallback: TranslationProvider | None = None) -> None:
+        self._ai_provider = ai_provider
+        self._fallback = fallback or RuleBasedTranslationProvider()
+
+    def detect_language(self, text: str) -> str:
+        fallback_value = self._fallback.detect_language(text)
+        response = self._ask(
+            system_prompt=(
+                "You detect language in short text. "
+                "Return only one code: ja, id, en, or unknown."
+            ),
+            user_prompt=f"Text:\n{text}",
+        )
+        if response is None:
+            return fallback_value
+
+        normalized = response.strip().lower().split()[0]
+        if normalized in {"ja", "id", "en", "unknown"}:
+            return normalized
+        return fallback_value
+
+    def translate_to_indonesian(self, text: str) -> str:
+        fallback_value = self._fallback.translate_to_indonesian(text)
+        response = self._ask(
+            system_prompt=(
+                "You are a practical translator. "
+                "Translate the input into clear natural Indonesian while preserving intent."
+            ),
+            user_prompt=f"Source text:\n{text}",
+        )
+        return response or fallback_value
+
+    def explain_practical_meaning(self, text: str, *, context: TranslationContext | None = None) -> str:
+        fallback_value = self._fallback.explain_practical_meaning(text, context=context)
+        response = self._ask(
+            system_prompt=(
+                "Explain practical meaning for a busy Indonesian professional. "
+                "Give concise action-oriented explanation in Indonesian."
+            ),
+            user_prompt=self._build_context_prompt(text=text, context=context),
+        )
+        return response or fallback_value
+
+    def analyze_tone(self, text: str) -> str:
+        fallback_value = self._fallback.analyze_tone(text)
+        response = self._ask(
+            system_prompt=(
+                "Classify message tone. Return one short label only. "
+                "Examples: polite_formal, urgent, apologetic, neutral, strong."
+            ),
+            user_prompt=f"Text:\n{text}",
+        )
+        return response.strip().lower().replace(" ", "_") if response else fallback_value
+
+    def analyze_hierarchy(self, text: str, *, context: TranslationContext | None = None) -> str:
+        fallback_value = self._fallback.analyze_hierarchy(text, context=context)
+        response = self._ask(
+            system_prompt=(
+                "Infer communication hierarchy. Return one short label only. "
+                "Prefer: upward_or_external_formal, peer_professional, casual_personal, unknown_hierarchy."
+            ),
+            user_prompt=self._build_context_prompt(text=text, context=context),
+        )
+        if response is None:
+            return fallback_value
+        normalized = response.strip().lower().replace(" ", "_")
+        allowed = {
+            "upward_or_external_formal",
+            "peer_professional",
+            "casual_personal",
+            "unknown_hierarchy",
+        }
+        return normalized if normalized in allowed else fallback_value
+
+    def classify_urgency(self, text: str) -> str:
+        fallback_value = self._fallback.classify_urgency(text)
+        response = self._ask(
+            system_prompt=(
+                "Classify urgency of the message. Return one word only: low, medium, high, or critical."
+            ),
+            user_prompt=f"Text:\n{text}",
+        )
+        if response is None:
+            return fallback_value
+
+        normalized = response.strip().lower().split()[0]
+        return normalized if normalized in {"low", "medium", "high", "critical"} else fallback_value
+
+    def explain_risk(
+        self,
+        text: str,
+        *,
+        tone: str,
+        hierarchy: str,
+        urgency: str,
+        context: TranslationContext | None = None,
+    ) -> str:
+        fallback_value = self._fallback.explain_risk(
+            text,
+            tone=tone,
+            hierarchy=hierarchy,
+            urgency=urgency,
+            context=context,
+        )
+        response = self._ask(
+            system_prompt=(
+                "Explain communication risk in Indonesian. "
+                "Focus on misunderstanding, hierarchy mismatch, and response timing risk."
+            ),
+            user_prompt=(
+                f"{self._build_context_prompt(text=text, context=context)}\n"
+                f"Tone: {tone}\nHierarchy: {hierarchy}\nUrgency: {urgency}"
+            ),
+        )
+        return response or fallback_value
+
+    def _ask(self, *, system_prompt: str, user_prompt: str) -> str | None:
+        if not self._ai_provider.is_available():
+            return None
+
+        try:
+            return self._ai_provider.generate_text(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.1,
+            )
+        except Exception:
+            return None
+
+    @staticmethod
+    def _build_context_prompt(*, text: str, context: TranslationContext | None) -> str:
+        if context is None:
+            return f"Text:\n{text}"
+        return (
+            f"Text:\n{text}\n"
+            f"Context JSON:\n{json.dumps(context.model_dump(mode='json'), ensure_ascii=False)}"
+        )

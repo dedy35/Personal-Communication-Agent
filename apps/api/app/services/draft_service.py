@@ -18,6 +18,7 @@ from app.schemas.drafting import (
     TranslationAnalysisInput,
 )
 from app.schemas.translation import TranslationContext
+from app.services.ai_provider import AIProvider, get_default_ai_provider
 from app.services.translation_service import TranslationService
 
 if TYPE_CHECKING:
@@ -50,9 +51,15 @@ class DraftService:
     for model-based generation later.
     """
 
-    def __init__(self, db: Session, translation_service: TranslationService | None = None) -> None:
+    def __init__(
+        self,
+        db: Session,
+        translation_service: TranslationService | None = None,
+        ai_provider: AIProvider | None = None,
+    ) -> None:
         self._db = db
-        self._translation_service = translation_service or TranslationService()
+        self._ai_provider = ai_provider or get_default_ai_provider()
+        self._translation_service = translation_service or TranslationService(ai_provider=self._ai_provider)
 
     def generate_draft(self, payload: DraftGenerateRequest) -> DraftGenerateResponse:
         conversation = self._db.get(Conversation, payload.conversation_id)
@@ -83,15 +90,24 @@ class DraftService:
             additional_context=payload.additional_context,
         )
 
-        translated = self._translation_service.translate_to_indonesian(plan.japanese_text)
+        generated_text = self._generate_with_ai(
+            selected_tone=payload.selected_tone,
+            urgency=plan.urgency,
+            practical_meaning=analysis.practical_meaning,
+            source_text=source_message.body_original,
+            fallback_text=plan.japanese_text,
+            additional_context=payload.additional_context,
+        )
+
+        translated = self._translation_service.translate_to_indonesian(generated_text)
 
         draft = Draft(
             message_id=source_message.id,
             target_conversation_id=conversation.id,
             language="ja",
-            body_original=plan.japanese_text,
+            body_original=generated_text,
             body_translated=translated,
-            exact_message_body=plan.japanese_text,
+            exact_message_body=generated_text,
             tone=plan.tone,
             urgency=plan.urgency,
             requires_reply=True,
@@ -134,6 +150,15 @@ class DraftService:
 
         revised_text, revision_actions = self._apply_instruction(base_text, payload.instruction)
         applied_actions.extend(revision_actions)
+
+        ai_revision = self._revise_with_ai(
+            base_text=revised_text,
+            instruction=payload.instruction,
+            selected_tone=payload.selected_tone,
+        )
+        if ai_revision:
+            revised_text = ai_revision
+            applied_actions.append("ai revision applied")
 
         draft.body_original = revised_text
         draft.exact_message_body = revised_text
@@ -305,6 +330,79 @@ class DraftService:
 
         working = re.sub(r"\s+", " ", working).strip()
         return working, actions
+
+    def _generate_with_ai(
+        self,
+        *,
+        selected_tone: DraftTone,
+        urgency: str,
+        practical_meaning: str,
+        source_text: str,
+        fallback_text: str,
+        additional_context: str | None,
+    ) -> str:
+        if not self._ai_provider.is_available():
+            return fallback_text
+
+        prompt = (
+            "Buat 1 draft balasan bahasa Jepang.\n"
+            f"- Tone: {selected_tone.value}\n"
+            f"- Urgency: {urgency}\n"
+            f"- Makna praktis: {practical_meaning}\n"
+            f"- Pesan sumber: {source_text}\n"
+        )
+        if additional_context and additional_context.strip():
+            prompt += f"- Konteks tambahan: {additional_context.strip()}\n"
+        prompt += "Output hanya teks balasan Jepang tanpa bullet dan tanpa penjelasan."
+
+        try:
+            response = self._ai_provider.generate_text(
+                system_prompt=(
+                    "You draft Japanese professional replies. "
+                    "Be concise, polite, and actionable."
+                ),
+                user_prompt=prompt,
+                temperature=0.2,
+            )
+        except Exception:
+            return fallback_text
+
+        if not response:
+            return fallback_text
+
+        candidate = re.sub(r"\s+", " ", response).strip()
+        return candidate or fallback_text
+
+    def _revise_with_ai(self, *, base_text: str, instruction: str, selected_tone: DraftTone | None) -> str | None:
+        if not self._ai_provider.is_available():
+            return None
+
+        prompt = (
+            "Revisi draft balasan Jepang sesuai instruksi user.\n"
+            f"- Draft sekarang: {base_text}\n"
+            f"- Instruksi: {instruction}\n"
+        )
+        if selected_tone is not None:
+            prompt += f"- Tone terpilih: {selected_tone.value}\n"
+        prompt += "Output hanya teks draft hasil revisi, tanpa penjelasan."
+
+        try:
+            response = self._ai_provider.generate_text(
+                system_prompt=(
+                    "You revise Japanese reply drafts precisely. "
+                    "Keep meaning stable unless instruction explicitly changes content."
+                ),
+                user_prompt=prompt,
+                temperature=0.2,
+            )
+        except Exception:
+            return None
+
+        if not response:
+            return None
+
+        candidate = re.sub(r"\s+", " ", response).strip()
+        return candidate or None
 
     @staticmethod
     def _shorten_text(text: str) -> str:

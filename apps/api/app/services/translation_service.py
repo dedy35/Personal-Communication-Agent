@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from app.schemas.translation import TranslationAnalysis, TranslationContext
-from app.services.translation_provider import RuleBasedTranslationProvider, TranslationProvider
+from app.services.ai_provider import AIProvider, get_default_ai_provider
+from app.services.translation_provider import AIEnhancedTranslationProvider, RuleBasedTranslationProvider, TranslationProvider
 
 
 class TranslationService:
@@ -12,8 +13,20 @@ class TranslationService:
     Ollama/OpenAI while keeping this interface unchanged.
     """
 
-    def __init__(self, provider: TranslationProvider | None = None) -> None:
-        self._provider = provider or RuleBasedTranslationProvider()
+    def __init__(
+        self,
+        provider: TranslationProvider | None = None,
+        ai_provider: AIProvider | None = None,
+    ) -> None:
+        if provider is not None:
+            self._provider = provider
+            return
+
+        fallback = RuleBasedTranslationProvider()
+        self._provider = AIEnhancedTranslationProvider(
+            ai_provider=ai_provider or get_default_ai_provider(),
+            fallback=fallback,
+        )
 
     def detect_language(self, text: str) -> str:
         return self._provider.detect_language(text)

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models import AgentChatMessage, AgentChatSession, Conversation, Draft, Message
 from app.schemas.agent_chat import AgentChatMessageView, AgentChatResponse
+from app.services.ai_provider import AIProvider, get_default_ai_provider
 
 
 @dataclass(slots=True)
@@ -181,9 +182,15 @@ class RuleBasedAgentResponder:
 
 
 class AgentService:
-    def __init__(self, db: Session, responder: AgentResponder | None = None) -> None:
+    def __init__(
+        self,
+        db: Session,
+        responder: AgentResponder | None = None,
+        ai_provider: AIProvider | None = None,
+    ) -> None:
         self._db = db
         self._responder = responder or RuleBasedAgentResponder()
+        self._ai_provider = ai_provider or get_default_ai_provider()
 
     def chat(self, message: str, session_key: str | None, language: str | None = None) -> AgentChatResponse:
         session = self._get_or_create_session(session_key=session_key)
@@ -198,10 +205,16 @@ class AgentService:
 
         agent_reply = self._responder.generate(user_message=message, db=self._db)
 
+        final_reply = self._refine_reply_with_ai(
+            intent=agent_reply.intent,
+            user_message=message,
+            fallback_reply=agent_reply.text,
+        )
+
         assistant_message = AgentChatMessage(
             session_id=session.id,
             role="assistant",
-            body=agent_reply.text,
+            body=final_reply,
             language="en",
         )
         self._db.add(assistant_message)
@@ -218,7 +231,7 @@ class AgentService:
         return AgentChatResponse(
             session_key=session.session_key,
             matched_intent=agent_reply.intent,
-            reply=agent_reply.text,
+            reply=final_reply,
             messages=[
                 AgentChatMessageView(
                     role=item.role,
@@ -229,6 +242,33 @@ class AgentService:
                 for item in rows
             ],
         )
+
+    def _refine_reply_with_ai(self, *, intent: str, user_message: str, fallback_reply: str) -> str:
+        if not self._ai_provider.is_available():
+            return fallback_reply
+
+        prompt = (
+            "Refine this operational assistant response.\n"
+            f"Intent: {intent}\n"
+            f"User request: {user_message}\n"
+            f"Draft response:\n{fallback_reply}\n\n"
+            "Keep all facts and counts exactly the same. Improve clarity only."
+        )
+        try:
+            refined = self._ai_provider.generate_text(
+                system_prompt=(
+                    "You are a concise assistant for communication operations. "
+                    "Do not invent facts or numbers."
+                ),
+                user_prompt=prompt,
+                temperature=0.1,
+            )
+        except Exception:
+            return fallback_reply
+
+        if not refined:
+            return fallback_reply
+        return refined.strip() or fallback_reply
 
     def _get_or_create_session(self, session_key: str | None) -> AgentChatSession:
         if session_key:
